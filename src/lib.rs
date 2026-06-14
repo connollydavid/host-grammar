@@ -37,6 +37,23 @@ pub fn is_valid_slug(slug: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// Whether a token reads as a numeral: an Arabic integer (`"5"`) or single
+/// decimal (`"5.5"`) — a version-like form with two or more dots (`"1.2.3"`) is
+/// not — or a short Roman numeral (`"II"`). This is the numeral the checker
+/// (`host-lint`) flags after a tell-noun and the generator pads into a register
+/// number — defined once, here.
+pub fn is_numeral(word: &str) -> bool {
+    if word.is_empty() {
+        return false;
+    }
+    let parts: Vec<&str> = word.split('.').collect();
+    if parts.len() <= 2 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
+        return true;
+    }
+    let upper = word.to_uppercase();
+    upper.len() <= 4 && upper.chars().all(|c| matches!(c, 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +78,15 @@ mod tests {
         assert!(!is_valid_name("0001-")); // empty slug
         assert!(!is_valid_name("0001--double")); // doubled hyphen
         assert!(!is_valid_name("example")); // no number
+    }
+
+    #[test]
+    fn numerals() {
+        assert!(is_numeral("5"));
+        assert!(is_numeral("5.5")); // single decimal
+        assert!(is_numeral("II")); // roman
+        assert!(!is_numeral("1.2.3")); // version string, not a numeral
+        assert!(!is_numeral("first")); // ordinal word
+        assert!(!is_numeral("")); // empty
     }
 }
