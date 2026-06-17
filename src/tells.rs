@@ -1,17 +1,11 @@
-//! Agentic-tell detection — a token-free English adaptation of the tropes
-//! catalogued at tropes.fyi/tropes-md (Ossama, ossama.is). A *tell* is a
-//! stylistic device that, in isolation is harmless but, piled up, reads as
-//! machine-generated prose. We score density rather than ban devices: one
-//! tricolon is rhetoric; five in a paragraph is a tell.
+//! Agentic-tell detection: a token-free adaptation of the tropes.fyi catalog.
 //!
-//! Three layers (all token-free — no model, no word list licensing):
+//! Three layers, all token-free (no model, no licensed lexicon):
 //!   1. Lexical: phrase/character rules (`CORPUS`).
-//!   2. Structural: windowed heuristics with explicit equations (`scan_prose`).
+//!   2. Structural: windowed equations (`scan_prose`).
 //!   3. Composite: a per-document density `Score` (`tell_score`).
 //!
-//! References. Catalog: tropes.fyi/tropes-md (Ossama). Classical rhetoric terms
-//! (anaphora, tricolon, anadiplosis) carry their standard meaning; tropes.fyi is
-//! cited as the catalog, not as primary linguistics (it is itself AI-assisted).
+//! Catalog cite: tropes.fyi/tropes-md (Ossama, ossama.is).
 
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -38,8 +32,7 @@ pub struct Tell {
     pub cite: &'static str,
 }
 
-/// Per-document aggregate — implements tropes.fyi's "the problem is many
-/// together": individual tells are advisory, the density is what escalates.
+/// Per-document aggregate: tell counts and the density gate.
 #[derive(Clone, Copy, Debug)]
 pub struct Score {
     pub tells: usize,
@@ -51,8 +44,7 @@ pub struct Score {
     pub over_threshold: bool,
 }
 
-// A lexical corpus entry: one trope, the phrases that signal it, a weight, and a
-// citation. Phrases are lowercase; matching is word-boundaried and case-folded.
+// One trope: signal phrases (lowercase), a weight, a citation.
 struct Lexeme {
     id: &'static str,
     phrases: &'static [&'static str],
@@ -60,8 +52,7 @@ struct Lexeme {
     cite: &'static str,
 }
 
-// The lexical layer. Token-free: these are public-domain English phrases, not a
-// licensed lexicon. Weights are deliberately low — one word is never a verdict.
+// Lexical layer: public-domain phrases, low weights (one word is never a verdict).
 const CORPUS: &[Lexeme] = &[
     Lexeme {
         id: "ai-diction",
@@ -111,8 +102,7 @@ const CORPUS: &[Lexeme] = &[
     },
     Lexeme {
         id: "decoration",
-        // ASCII-decoration tells: em/en-dash, smart quotes, arrows. Matched as
-        // characters, so the boundary rule is relaxed for these (see `matches`).
+        // Typographic tells; matched as characters (no word boundary, see `lexical`).
         phrases: &["—", "–", "“", "”", "‘", "’", "→"],
         weight: 0.3,
         cite: "tropes.fyi: typographic polish",
@@ -441,9 +431,7 @@ pub fn scan_prose(text: &str) -> Vec<Tell> {
     out
 }
 
-/// Conservative gate: a document is over-threshold when its weighted tell mass
-/// is high in absolute terms *and* dense relative to its length. Starting
-/// values are intentionally cautious; tune with fixtures.
+// Over-threshold needs high absolute weight AND high density (conservative; tune with fixtures).
 const ABS_GATE: f32 = 4.0;
 const DENSITY_GATE: f32 = 0.6;
 
