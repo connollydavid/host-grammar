@@ -4,6 +4,13 @@
 //! *generator*) depend on this crate, so that what the generator emits is
 //! exactly what the checker accepts. The number is identity; the slug is
 //! content; ordering lives in the index, never in the name.
+//!
+//! It also hosts the agentic-tell prose engine (`tells`): a token-free
+//! adaptation of tropes.fyi catalogued as lexical phrases and structural
+//! equations, scored by density. The checker (`host-lint`) calls it.
+
+mod tells;
+pub use tells::{scan_prose, tell_score, Kind, Score, Tell};
 
 /// Zero-padded width for the monotonic registers (milestones, decisions).
 pub const PAD_WIDTH: usize = 4;
