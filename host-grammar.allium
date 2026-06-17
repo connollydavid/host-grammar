@@ -1,0 +1,129 @@
+-- host-grammar.allium
+-- Specification for the agentic-tell prose engine (the `tells` module).
+-- Naming-tell detection is specified in host-lint.allium; this covers the
+-- token-free prose equations and their composite density score.
+
+entity Sentence {
+    text: String
+    opener: String -- first content word, leading stopword skipped
+}
+
+entity Tell {
+    id: String      -- kebab-case trope id (e.g. "anaphora")
+    kind: lexical | structural
+    weight: Real    -- contribution to the document score; > 0
+    cite: String    -- tropes.fyi catalog name + rhetoric term
+}
+
+entity Score {
+    weighted: Real      -- Σ weight over all tells
+    sentences: Integer  -- >= 1
+    density: Real       -- weighted / sentences
+    over_threshold: Bool
+}
+
+config {
+    negation_window: Integer = 6 -- W in the negative-parallelism equation
+    triad_max_span: Integer = 5  -- max words per tricolon span
+    abs_gate: Real = 4.0
+    density_gate: Real = 0.6
+}
+
+-- === Structural equations ===
+
+rule NegativeParallelism {
+    -- neg_par(s) = |{(i,j): word_i in NEG, word_j in PIVOT, 0 < j-i <= W}|
+    when: s: Sentence
+    let n = count of (negation, pivot) pairs within config.negation_window tokens
+    ensures: n Tell.created(id: "negative-parallelism", kind: structural, weight: 1.2)
+}
+
+rule Tricolon {
+    -- is_triad(s) = 1 when s has >= 2 commas, "and"/"or" before the final item,
+    -- and every comma-span is 1..=triad_max_span words with no internal . ! ? ;
+    when: s: Sentence where is_triad(s)
+    ensures: one Tell.created(id: "tricolon", kind: structural, weight: 0.9)
+}
+
+rule Anaphora {
+    -- anaphora = Σ_runs max(0, L_r - 2)^2 over runs of consecutive same-opener
+    -- sentences; a run scores only when L >= 3.
+    when: run: consecutive Sentences sharing opener, length L >= 3
+    ensures: one Tell.created(id: "anaphora", kind: structural, weight: (L-2)*(L-2))
+}
+
+rule Countdown {
+    -- run of >= 2 sentence-initial "Not"/"No" closed by "Just"/"Only"
+    when: run of length k >= 2 of Not-initial Sentences immediately followed by a Just-initial Sentence
+    ensures: one Tell.created(id: "countdown", kind: structural, weight: 1.3) -- reported length k+1
+}
+
+rule SelfAnsweredQuestion {
+    -- a "?"-terminated sentence immediately followed by a 1..=5 word fragment
+    when: pair: (q: Sentence, a: Sentence) where q.text ends_with "?" and 1 <= words(a) <= 5
+    ensures: one Tell.created(id: "self-answered-question", kind: structural, weight: 1.0)
+}
+
+rule Listicle {
+    -- anaphora over ordinals: run of L >= 3 ordinal-led sentences scores (L-2)^2
+    when: run: consecutive ordinal-led Sentences, length L >= 3
+    ensures: one Tell.created(id: "listicle", kind: structural, weight: (L-2)*(L-2))
+}
+
+rule Composite {
+    when: text: String
+    let weighted = Σ Tell.weight
+    let sentences = max(1, count of Sentence)
+    ensures: Score.created(weighted: weighted, sentences: sentences,
+                           density: weighted / sentences,
+                           over_threshold: weighted >= config.abs_gate
+                                           and density >= config.density_gate)
+}
+
+-- === Invariants (the PBT properties verify these) ===
+
+invariant AnaphoraSuperlinear {
+    -- weight grows as the square of the excess run length
+    for L in Integer where L >= 3:
+        anaphora_weight(L) = (L-2)*(L-2)
+    -- and is non-decreasing in L
+    for L1, L2 where 3 <= L1 <= L2:
+        anaphora_weight(L1) <= anaphora_weight(L2)
+}
+
+invariant AnaphoraPairIsFree {
+    for run of consecutive same-opener Sentences of length L <= 2:
+        no Tell with id "anaphora"
+}
+
+invariant TricolonSpanBound {
+    for s: Sentence where any comma-span has more than config.triad_max_span words:
+        no Tell with id "tricolon"
+}
+
+invariant NegationWithoutPivotIsClean {
+    for s: Sentence containing a negation but no pivot within config.negation_window:
+        no Tell with id "negative-parallelism"
+}
+
+invariant SelfAnsweredFragmentBound {
+    for pair (q, a) where q ends_with "?" and words(a) > 5:
+        no Tell with id "self-answered-question" for that pair
+}
+
+invariant ProseTellsAreAdvisory {
+    -- the checker (host-lint) maps every prose Tell to warn severity, never flag
+    for t: Tell:
+        host_lint_severity(t) = warn
+}
+
+invariant DensityGateRequiresBoth {
+    for text: String:
+        Score.over_threshold implies
+            (Score.weighted >= config.abs_gate and Score.density >= config.density_gate)
+}
+
+invariant WeightsPositive {
+    for t: Tell:
+        t.weight > 0
+}

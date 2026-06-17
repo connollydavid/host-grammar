@@ -7,3 +7,6 @@ license = "Unlicense"
 
 [dependencies]
 unicode-segmentation = "1.13.3"
+
+[dev-dependencies]
+proptest = "1.11.0"
