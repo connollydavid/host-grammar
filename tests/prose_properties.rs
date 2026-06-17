@@ -9,6 +9,34 @@ fn tells_with(text: &str, id: &str) -> Vec<host_grammar::Tell> {
     scan_prose(text).into_iter().filter(|t| t.id == id).collect()
 }
 
+// Declarative reference for the anaphora equation: group an opener sequence into
+// maximal runs, then Σ max(0, L-2)^2 over run lengths. Computed independently of
+// the engine's streaming accumulator, so equality is a refinement check.
+fn ref_anaphora_weight(openers: &[usize]) -> f32 {
+    let mut lens: Vec<usize> = Vec::new();
+    for (i, &o) in openers.iter().enumerate() {
+        if i > 0 && openers[i - 1] == o {
+            *lens.last_mut().unwrap() += 1;
+        } else {
+            lens.push(1);
+        }
+    }
+    lens.iter().map(|&l| if l >= 3 { ((l - 2) * (l - 2)) as f32 } else { 0.0 }).sum()
+}
+
+// Build a document whose sentence openers are exactly `openers` (a small alphabet
+// of non-stopwords), each sentence otherwise unique so only anaphora can fire.
+// Sentences are capitalized: Unicode sentence segmentation (UAX#29) only treats
+// ". " as a boundary before a capital, which is how real prose anaphora reads.
+fn doc_from_openers(openers: &[usize]) -> String {
+    const WORDS: [&str; 4] = ["We", "They", "Cats", "Dogs"];
+    openers
+        .iter()
+        .enumerate()
+        .map(|(i, &o)| format!("{} run{i}. ", WORDS[o % WORDS.len()]))
+        .collect()
+}
+
 proptest! {
     // invariant AnaphoraSuperlinear: a run of L same-opener sentences (L >= 3)
     // yields exactly one anaphora tell of weight (L-2)^2.
@@ -84,6 +112,29 @@ proptest! {
         let ords = ["First", "Second", "Third", "Fourth", "Fifth"];
         let text: String = (0..n).map(|i| format!("{} we move. ", ords[i])).collect();
         prop_assert!(!tells_with(&text, "listicle").is_empty(), "text: {}", text);
+    }
+
+    // Refinement: the engine's total anaphora weight equals the declarative sum
+    // over maximal runs, for an arbitrary opener stream. Exercises sentence
+    // splitting + opener extraction + run detection + the end-of-stream flush.
+    #[test]
+    fn anaphora_refines_reference_sum(openers in prop::collection::vec(0usize..4, 0..14)) {
+        let text = doc_from_openers(&openers);
+        let engine: f32 = tells_with(&text, "anaphora").iter().map(|t| t.weight).sum();
+        prop_assert_eq!(engine, ref_anaphora_weight(&openers), "openers: {:?}", openers);
+    }
+
+    // The tail run is not dropped: a stream ending in a run of length L >= 3 is
+    // counted (the flush after the loop).
+    #[test]
+    fn anaphora_counts_the_tail_run(prefix in prop::collection::vec(0usize..4, 0..6), tail in 3usize..7) {
+        // a final run of `tail` sentences all sharing opener index 0, preceded by
+        // a differing opener so the tail is its own maximal run
+        let mut openers = prefix.iter().map(|&o| (o % 3) + 1).collect::<Vec<_>>();
+        openers.extend(std::iter::repeat(0).take(tail));
+        let text = doc_from_openers(&openers);
+        let engine: f32 = tells_with(&text, "anaphora").iter().map(|t| t.weight).sum();
+        prop_assert_eq!(engine, ref_anaphora_weight(&openers), "openers: {:?}", openers);
     }
 
     // invariant WeightsPositive: every emitted tell carries a positive weight.

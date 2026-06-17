@@ -271,7 +271,7 @@ fn self_answered(sents: &[&str]) -> usize {
 fn listicle(sents: &[&str]) -> usize {
     let mut run = 0usize;
     let mut score = 0usize;
-    let mut flush = |run: usize| if run >= 3 { (run - 2) * (run - 2) } else { 0 };
+    let flush = |run: usize| if run >= 3 { (run - 2) * (run - 2) } else { 0 };
     for s in sents {
         let first = lc_words(s).into_iter().next().unwrap_or_default();
         if ORDINALS.contains(&first.as_str()) {
