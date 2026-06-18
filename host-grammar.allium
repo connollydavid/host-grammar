@@ -29,15 +29,19 @@ entity Sentence {
     negation_with_pivot: Boolean
     is_question: Boolean
     followed_by_short_fragment: Boolean
+    has_ing_tail: Boolean
+    has_false_range: Boolean
 }
 
--- A maximal run of consecutive sentences sharing an opener (or an ordinal lead).
--- Anaphora and its listicle variant score on the run, not the single sentence.
+-- A maximal run of consecutive sentences sharing an opener (or an ordinal lead),
+-- or a "Not… / Just…" countdown run. Anaphora, its listicle variant, and the
+-- countdown score on the run, not the single sentence.
 entity Run {
     document: Document
     opener: String
     length: Integer
     ordinal_led: Boolean
+    is_countdown: Boolean
 }
 
 entity Tell {
@@ -76,6 +80,18 @@ rule DetectSelfAnsweredQuestion {
     ensures: Tell.created(document: sentence.document, id: "self-answered-question", kind: structural, weight: 1.0, cite: "tropes.fyi/self-answered-question")
 }
 
+rule DetectIngTail {
+    when: sentence: Sentence.created
+    requires: sentence.has_ing_tail
+    ensures: Tell.created(document: sentence.document, id: "ing-tail", kind: structural, weight: 0.7, cite: "tropes.fyi/ing-tail")
+}
+
+rule DetectFalseRange {
+    when: sentence: Sentence.created
+    requires: sentence.has_false_range
+    ensures: Tell.created(document: sentence.document, id: "false-range", kind: structural, weight: 0.5, cite: "tropes.fyi/false-range")
+}
+
 -- === Run tells score superlinearly: weight = (L - 2)^2 for runs of length >= 3 ===
 
 rule DetectAnaphora {
@@ -88,6 +104,13 @@ rule DetectListicle {
     when: run: Run.created
     requires: run.length >= 3 and run.ordinal_led
     ensures: Tell.created(document: run.document, id: "listicle", kind: structural, weight: (run.length - 2) * (run.length - 2), cite: "tropes.fyi/listicle-in-prose")
+}
+
+-- A "Not… / Just…" countdown run scores a fixed weight, independent of length.
+rule DetectCountdown {
+    when: run: Run.created
+    requires: run.is_countdown
+    ensures: Tell.created(document: run.document, id: "countdown", kind: structural, weight: 1.3, cite: "tropes.fyi/countdown")
 }
 
 -- === Invariants (the property-based tests verify these) ===
