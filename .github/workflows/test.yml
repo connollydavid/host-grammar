@@ -1,0 +1,16 @@
+# Run the unit + property-based tests. The PBTs in tests/prose_properties.rs are
+# what the allium obligations manifest (host-grammar.obligations) maps obligations
+# to — without this job they would be named but never executed.
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo test
+        run: cargo test
