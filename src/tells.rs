@@ -659,11 +659,9 @@ pub fn scan_prose_markdown(md: &str) -> Vec<Tell> {
 const ABS_GATE: f32 = 4.0;
 const DENSITY_GATE: f32 = 0.6;
 
-/// Aggregate the tells of `text` into a document `Score`.
-pub fn tell_score(text: &str) -> Score {
-    let tells = scan_prose_parallel(text);
+fn score_of(tells: &[Tell], sentence_count: usize) -> Score {
     let weighted: f32 = tells.iter().map(|t| t.weight).sum();
-    let sentences = sentences(text).len().max(1);
+    let sentences = sentence_count.max(1);
     let density = weighted / sentences as f32;
     Score {
         tells: tells.len(),
@@ -672,6 +670,24 @@ pub fn tell_score(text: &str) -> Score {
         density,
         over_threshold: weighted >= ABS_GATE && density >= DENSITY_GATE,
     }
+}
+
+/// Aggregate the tells of `text` (plain prose) into a document `Score`.
+pub fn tell_score(text: &str) -> Score {
+    score_of(&scan_prose_parallel(text), sentences(text).len())
+}
+
+/// Markdown-aware document `Score`: tells and sentence count exclude code blocks
+/// and headings, matching `scan_prose_markdown`.
+pub fn tell_score_markdown(md: &str) -> Score {
+    let blocks = parse_markdown(md);
+    let body = blocks
+        .iter()
+        .filter(|b| b.kind != BlockKind::Heading)
+        .map(|b| b.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    score_of(&scan_prose_markdown(md), sentences(&body).len())
 }
 
 #[cfg(test)]

@@ -11,8 +11,8 @@
 
 mod tells;
 pub use tells::{
-    scan_chunked, scan_prose, scan_prose_markdown, scan_prose_parallel, tell_score, Kind, Score,
-    Tell,
+    scan_chunked, scan_prose, scan_prose_markdown, scan_prose_parallel, tell_score,
+    tell_score_markdown, Kind, Score, Tell,
 };
 
 /// Zero-padded width for the monotonic registers (milestones, decisions).
