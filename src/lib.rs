@@ -10,7 +10,10 @@
 //! equations, scored by density. The checker (`host-lint`) calls it.
 
 mod tells;
-pub use tells::{scan_chunked, scan_prose, scan_prose_parallel, tell_score, Kind, Score, Tell};
+pub use tells::{
+    scan_chunked, scan_prose, scan_prose_markdown, scan_prose_parallel, tell_score, Kind, Score,
+    Tell,
+};
 
 /// Zero-padded width for the monotonic registers (milestones, decisions).
 pub const PAD_WIDTH: usize = 4;

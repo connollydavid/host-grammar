@@ -138,7 +138,9 @@ fn lexical(text: &str, out: &mut Vec<Tell>) {
                     out.push(Tell {
                         id: lex.id,
                         kind: Kind::Lexical,
-                        excerpt: text[at..end].to_string(),
+                        // Index into `lower`, not `text`: case-folding can change
+                        // byte lengths, so `at`/`end` are only valid in `lower`.
+                        excerpt: lower[at..end].to_string(),
                         weight: lex.weight,
                         cite: lex.cite,
                     });
@@ -315,7 +317,7 @@ fn shape(text: &str, out: &mut Vec<Tell>) {
     if paras.len() >= 4 {
         let single = paras.iter().filter(|p| !p.contains('\n') && sentences(p).len() <= 1).count();
         let ratio = single as f32 / paras.len() as f32;
-        if ratio >= 0.5 {
+        if ratio > 0.5 {
             out.push(Tell {
                 id: "punchy-fragments",
                 kind: Kind::Structural,
@@ -505,6 +507,154 @@ pub fn scan_chunked(text: &str, k: usize) -> Vec<Tell> {
     assemble(text, per_sentence, &metas)
 }
 
+// === Markdown-aware scanning (plan/0010) ===
+
+#[derive(PartialEq, Clone, Copy)]
+enum BlockKind {
+    Para,
+    Heading,
+    ListItem,
+}
+
+// A prose block extracted from markdown: its text with code, link targets, and
+// markup removed. `bold_first` marks a list item whose first inline is bold.
+struct Block {
+    kind: BlockKind,
+    text: String,
+    bold_first: bool,
+}
+
+// Parse markdown into prose blocks, dropping code blocks and inline code and
+// keeping only link/image visible text (not URLs).
+fn parse_markdown(md: &str) -> Vec<Block> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut cur: Option<Block> = None;
+    let mut in_code = false;
+
+    let flush = |cur: &mut Option<Block>, blocks: &mut Vec<Block>| {
+        if let Some(b) = cur.take() {
+            if !b.text.trim().is_empty() {
+                blocks.push(b);
+            }
+        }
+    };
+    let start = |cur: &mut Option<Block>, blocks: &mut Vec<Block>, kind: BlockKind| {
+        flush(cur, blocks);
+        *cur = Some(Block { kind, text: String::new(), bold_first: false });
+    };
+
+    for ev in Parser::new(md) {
+        match ev {
+            Event::Start(Tag::CodeBlock(_)) => in_code = true,
+            Event::End(TagEnd::CodeBlock) => in_code = false,
+            Event::Start(Tag::Heading { .. }) => start(&mut cur, &mut blocks, BlockKind::Heading),
+            Event::End(TagEnd::Heading(_)) => flush(&mut cur, &mut blocks),
+            Event::Start(Tag::Item) => start(&mut cur, &mut blocks, BlockKind::ListItem),
+            Event::End(TagEnd::Item) => flush(&mut cur, &mut blocks),
+            Event::Start(Tag::Paragraph) => {
+                // A paragraph inside a list item continues the item; otherwise it
+                // opens a new prose paragraph.
+                if cur.as_ref().map(|b| b.kind != BlockKind::ListItem).unwrap_or(true) {
+                    start(&mut cur, &mut blocks, BlockKind::Para);
+                }
+            }
+            Event::End(TagEnd::Paragraph) => {
+                if cur.as_ref().map(|b| b.kind == BlockKind::Para).unwrap_or(false) {
+                    flush(&mut cur, &mut blocks);
+                }
+            }
+            Event::Start(Tag::Strong) => {
+                if let Some(b) = &mut cur {
+                    if b.kind == BlockKind::ListItem && b.text.trim().is_empty() {
+                        b.bold_first = true;
+                    }
+                }
+            }
+            Event::Text(t) => {
+                if !in_code {
+                    if let Some(b) = &mut cur {
+                        b.text.push_str(&t);
+                    }
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some(b) = &mut cur {
+                    b.text.push(' ');
+                }
+            }
+            // Inline `code`, link/image URLs, and html are not prose: skipped.
+            _ => {}
+        }
+    }
+    flush(&mut cur, &mut blocks);
+    blocks
+}
+
+// Shape tells computed from markdown block structure: headings are excluded from
+// the paragraph count, and bold-first is read from the parse, not from `**`.
+fn markdown_shape(blocks: &[Block], out: &mut Vec<Tell>) {
+    let paras: Vec<&Block> = blocks.iter().filter(|b| b.kind == BlockKind::Para).collect();
+    if paras.len() >= 4 {
+        let single = paras.iter().filter(|b| sentences(&b.text).len() <= 1).count();
+        let ratio = single as f32 / paras.len() as f32;
+        if ratio > 0.5 {
+            out.push(Tell {
+                id: "punchy-fragments",
+                kind: Kind::Structural,
+                excerpt: format!("{single}/{} paragraphs are single-sentence", paras.len()),
+                weight: ratio * 2.0,
+                cite: "tropes.fyi: staccato paragraphs",
+            });
+        }
+    }
+    let bullets: Vec<&Block> = blocks.iter().filter(|b| b.kind == BlockKind::ListItem).collect();
+    if bullets.len() >= 3 {
+        let bold = bullets.iter().filter(|b| b.bold_first).count();
+        let ratio = bold as f32 / bullets.len() as f32;
+        if ratio >= 0.6 {
+            out.push(Tell {
+                id: "bold-first-bullets",
+                kind: Kind::Structural,
+                excerpt: format!("{bold}/{} bullets open with bold lead-ins", bullets.len()),
+                weight: ratio * 1.5,
+                cite: "tropes.fyi: bold-lead bullets",
+            });
+        }
+    }
+}
+
+/// Scan a markdown document for prose tells. Unlike `scan_prose`, code blocks and
+/// inline code are excluded, link URLs are dropped (visible text kept), and
+/// headings are scanned for tells but not counted as prose paragraphs.
+pub fn scan_prose_markdown(md: &str) -> Vec<Tell> {
+    let blocks = parse_markdown(md);
+    // Lexical (diction) is scanned over all block text, headings included — a
+    // heading can read "Let's unpack…". The per-sentence and cross-sentence
+    // equations run only over body blocks, so parallel headings ("Section one /
+    // two / three") are not read as an anaphora run.
+    let all_text = blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n\n");
+    let body = blocks
+        .iter()
+        .filter(|b| b.kind != BlockKind::Heading)
+        .map(|b| b.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let sents = sentences(&body);
+    let mut per_sentence = Vec::new();
+    let mut metas = Vec::with_capacity(sents.len());
+    for s in &sents {
+        sentence_tells(s, &mut per_sentence);
+        metas.push(sentence_meta(s));
+    }
+    let mut out = Vec::new();
+    lexical(&all_text, &mut out);
+    out.extend(per_sentence);
+    run_tells(&metas, &mut out);
+    markdown_shape(&blocks, &mut out);
+    out
+}
+
 // Over-threshold needs high absolute weight AND high density (conservative; tune with fixtures).
 const ABS_GATE: f32 = 4.0;
 const DENSITY_GATE: f32 = 0.6;
@@ -585,5 +735,39 @@ mod tests {
                      We delve. We leverage. We harness. The result? Pure synergy. \
                      Fast, clean, and robust.";
         assert!(tell_score(dense).over_threshold);
+    }
+
+    fn md_ids(md: &str) -> Vec<&'static str> {
+        scan_prose_markdown(md).into_iter().map(|t| t.id).collect()
+    }
+
+    #[test]
+    fn markdown_excludes_code_blocks_and_inline_code() {
+        let fenced = "Intro paragraph.\n\n```\nIt's not a tweak, it's a revolution — we delve.\n```\n";
+        assert!(md_ids(fenced).is_empty(), "{:?}", md_ids(fenced));
+        assert!(md_ids("Use the `delve --tapestry` flag.").is_empty());
+    }
+
+    #[test]
+    fn markdown_drops_link_urls_keeps_text() {
+        // "delve" only in the URL path → clean; the visible text is ordinary.
+        assert!(md_ids("See [the guide](https://x.test/delve/tapestry).").is_empty());
+        // but diction in the visible text is still caught
+        assert!(md_ids("See [delve into it](https://x.test/ok).").contains(&"ai-diction"));
+    }
+
+    #[test]
+    fn markdown_headings_are_not_runs_or_paragraphs() {
+        // parallel section headings must not read as an anaphora run
+        let doc = "# Title\n\n## Section one\n\n## Section two\n\n## Section three\n";
+        assert!(md_ids(doc).is_empty(), "{:?}", md_ids(doc));
+        // a single short doc is not staccato (more-than-half rule)
+        let short = "# T\n\nOne sentence intro.\n\nA body paragraph with two sentences. It keeps going.\n\nClosing line.\n";
+        assert!(!md_ids(short).contains(&"punchy-fragments"));
+    }
+
+    #[test]
+    fn markdown_still_scans_heading_diction() {
+        assert!(md_ids("## Let's unpack the design\n\nOrdinary text.").contains(&"pedagogical-hook"));
     }
 }

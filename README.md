@@ -18,7 +18,9 @@ tells are advisory; the density is what escalates — one tricolon is rhetoric,
 five in a paragraph is a tell. `scan_prose(text)` returns the hits;
 `tell_score(text)` aggregates them. `scan_prose_parallel(text)` is the same scan
 split across cores for large documents (identical result; see plan/0008 and
-`call/0015`). The checker (`host-lint`) calls these.
+`call/0015`). `scan_prose_markdown(md)` is markdown-aware: code blocks and inline
+code are excluded, link URLs dropped, and headings are scanned for diction but
+not counted as prose paragraphs (plan/0010). The checker (`host-lint`) calls these.
 
 A library crate, no binary; one zero-transitive-dependency crate
 (`unicode-segmentation`) for tokenizing. Released into the public domain

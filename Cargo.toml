@@ -6,6 +6,7 @@ description = "Shared rules for valid agentic-host names and numbers — the gra
 license = "Unlicense"
 
 [dependencies]
+pulldown-cmark = "0.13.4"
 unicode-segmentation = "1.13.3"
 
 [dev-dependencies]

@@ -161,3 +161,36 @@ invariant ParallelEqualsSequential {
     for text: String, k: Integer where k >= 1:
         scan_chunked(text, k) = scan_prose(text)
 }
+
+-- === Markdown-aware scan (plan/0010) ===
+
+entity Block {
+    kind: para | heading | list_item
+    text: String      -- prose only: no code, no link URLs, no markup
+    bold_first: Bool  -- list item whose first inline is bold
+}
+
+rule ScanProseMarkdown {
+    when: md: String  -- a markdown document
+    let blocks = parse_markdown(md)  -- code blocks and inline code dropped; link text kept, URL dropped
+    let body = blocks where kind != heading
+    ensures: result = lexical(all blocks' text)            -- diction incl. headings
+                    ++ per_sentence(body) ++ run(body)     -- equations over body only
+                    ++ markdown_shape(blocks)              -- headings not counted as paragraphs
+}
+
+invariant CodeIsNotProse {
+    for md: String:
+        tells from any fenced or inline code span in md = {}
+}
+
+invariant LinkUrlsAreNotProse {
+    for md: String:
+        a tell token appearing only in a link/image URL (not its visible text) does not fire
+}
+
+invariant HeadingsAreNotRuns {
+    -- parallel section headings must not read as an anaphora/listicle run
+    for md whose only repeated sentence-openers are in headings:
+        no run-equation Tell
+}
