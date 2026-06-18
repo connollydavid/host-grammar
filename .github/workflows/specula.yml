@@ -1,0 +1,28 @@
+# Specula lane (timing/concurrency): model-check the parallel-scan TLA+ spec with
+# TLC. Proves scan_chunked reconstructs its input for every worker-completion
+# interleaving (safety) and always terminates (liveness). The spec lives with the
+# code it constrains (scan_chunked), per the specs-co-locate-with-software rule.
+name: Specula
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tlc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Fetch tla2tools
+        run: curl -sSL -o tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+      - name: Model-check ParallelScan
+        working-directory: spec
+        run: |
+          out=$(java -cp "$GITHUB_WORKSPACE/tla2tools.jar" tlc2.TLC -config ParallelScan.cfg ParallelScan.tla 2>&1)
+          echo "$out"
+          echo "$out" | grep -q "Model checking completed. No error has been found." \
+            || { echo "::error::TLC found a violation or failed to run"; exit 1; }

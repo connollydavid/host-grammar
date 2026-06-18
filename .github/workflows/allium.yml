@@ -1,0 +1,21 @@
+# Allium lane (requirements): validate and analyse the prose-engine spec with the
+# real allium CLI. `check` parses + reports structural diagnostics; `analyse` adds
+# process completeness (data flow, reachability, terminal states, deadlock). Both
+# exit non-zero on any error or warning, so the job gates on a clean spec.
+name: Allium
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  allium:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install allium-cli (pinned 3.4.2)
+        run: cargo install allium-cli --version 3.4.2
+      - name: allium check
+        run: allium check host-grammar.allium
+      - name: allium analyse
+        run: allium analyse host-grammar.allium

@@ -1,196 +1,114 @@
--- host-grammar.allium
--- Specification for the agentic-tell prose engine (the `tells` module).
--- Naming-tell detection is specified in host-lint.allium; this covers the
--- token-free prose equations and their composite density score.
+-- allium: 3
+-- host-grammar: the agentic-tell prose engine (the `tells` module).
+-- Token-free prose equations and their composite density score. Naming-tell
+-- detection (is_numeral / is_valid_name) is specified in host-lint.allium; the
+-- parallel-scan interleaving is specified in ParallelScan.tla (Specula lane).
+
+config {
+    negation_window: Integer = 6
+    triad_max_span: Integer = 5
+    abs_gate: Decimal = 4.0
+    density_gate: Decimal = 0.6
+}
+
+enum TellKind {
+    lexical
+    structural
+}
+
+entity Document {
+    text: String
+    score: Score?
+}
 
 entity Sentence {
+    document: Document
     text: String
-    opener: String -- first content word, leading stopword skipped
+    opener: String
+    is_triad: Boolean
+    negation_with_pivot: Boolean
+    is_question: Boolean
+    followed_by_short_fragment: Boolean
+}
+
+-- A maximal run of consecutive sentences sharing an opener (or an ordinal lead).
+-- Anaphora and its listicle variant score on the run, not the single sentence.
+entity Run {
+    document: Document
+    opener: String
+    length: Integer
+    ordinal_led: Boolean
 }
 
 entity Tell {
-    id: String      -- kebab-case trope id (e.g. "anaphora")
-    kind: lexical | structural
-    weight: Real    -- contribution to the document score; > 0
-    cite: String    -- tropes.fyi catalog name + rhetoric term
+    document: Document
+    id: String
+    kind: TellKind
+    weight: Decimal
+    cite: String
 }
 
 entity Score {
-    weighted: Real      -- Σ weight over all tells
-    sentences: Integer  -- >= 1
-    density: Real       -- weighted / sentences
-    over_threshold: Bool
+    document: Document
+    weighted: Decimal
+    sentences: Integer
+    density: Decimal
+    over_threshold: Boolean
 }
 
-config {
-    negation_window: Integer = 6 -- W in the negative-parallelism equation
-    triad_max_span: Integer = 5  -- max words per tricolon span
-    abs_gate: Real = 4.0
-    density_gate: Real = 0.6
+-- === Lexical-phrase tells fire per sentence on a structural predicate ===
+
+rule DetectTricolon {
+    when: sentence: Sentence.created
+    requires: sentence.is_triad
+    ensures: Tell.created(document: sentence.document, id: "tricolon", kind: structural, weight: 0.9, cite: "tropes.fyi/tricolon")
 }
 
--- === Structural equations ===
-
-rule NegativeParallelism {
-    -- neg_par(s) = |{(i,j): word_i in NEG, word_j in PIVOT, 0 < j-i <= W}|
-    when: s: Sentence
-    let n = count of (negation, pivot) pairs within config.negation_window tokens
-    ensures: n Tell.created(id: "negative-parallelism", kind: structural, weight: 1.2)
+rule DetectNegativeParallelism {
+    when: sentence: Sentence.created
+    requires: sentence.negation_with_pivot
+    ensures: Tell.created(document: sentence.document, id: "negative-parallelism", kind: structural, weight: 1.2, cite: "tropes.fyi/negative-parallelism")
 }
 
-rule Tricolon {
-    -- is_triad(s) = 1 when s has >= 2 commas, "and"/"or" before the final item,
-    -- and every comma-span is 1..=triad_max_span words with no internal . ! ? ;
-    when: s: Sentence where is_triad(s)
-    ensures: one Tell.created(id: "tricolon", kind: structural, weight: 0.9)
+rule DetectSelfAnsweredQuestion {
+    when: sentence: Sentence.created
+    requires: sentence.is_question and sentence.followed_by_short_fragment
+    ensures: Tell.created(document: sentence.document, id: "self-answered-question", kind: structural, weight: 1.0, cite: "tropes.fyi/self-answered-question")
 }
 
-rule Anaphora {
-    -- anaphora = Σ_runs max(0, L_r - 2)^2 over runs of consecutive same-opener
-    -- sentences; a run scores only when L >= 3.
-    when: run: consecutive Sentences sharing opener, length L >= 3
-    ensures: one Tell.created(id: "anaphora", kind: structural, weight: (L-2)*(L-2))
+-- === Run tells score superlinearly: weight = (L - 2)^2 for runs of length >= 3 ===
+
+rule DetectAnaphora {
+    when: run: Run.created
+    requires: run.length >= 3 and not run.ordinal_led
+    ensures: Tell.created(document: run.document, id: "anaphora", kind: structural, weight: (run.length - 2) * (run.length - 2), cite: "rhetoric/anaphora")
 }
 
-rule Countdown {
-    -- run of >= 2 sentence-initial "Not"/"No" closed by "Just"/"Only"
-    when: run of length k >= 2 of Not-initial Sentences immediately followed by a Just-initial Sentence
-    ensures: one Tell.created(id: "countdown", kind: structural, weight: 1.3) -- reported length k+1
+rule DetectListicle {
+    when: run: Run.created
+    requires: run.length >= 3 and run.ordinal_led
+    ensures: Tell.created(document: run.document, id: "listicle", kind: structural, weight: (run.length - 2) * (run.length - 2), cite: "tropes.fyi/listicle-in-prose")
 }
 
-rule SelfAnsweredQuestion {
-    -- a "?"-terminated sentence immediately followed by a 1..=5 word fragment
-    when: pair: (q: Sentence, a: Sentence) where q.text ends_with "?" and 1 <= words(a) <= 5
-    ensures: one Tell.created(id: "self-answered-question", kind: structural, weight: 1.0)
+-- === Invariants (the property-based tests verify these) ===
+
+invariant WeightsPositive {
+    for tell in Tells:
+        tell.weight > 0
 }
 
-rule Listicle {
-    -- anaphora over ordinals: run of L >= 3 ordinal-led sentences scores (L-2)^2
-    when: run: consecutive ordinal-led Sentences, length L >= 3
-    ensures: one Tell.created(id: "listicle", kind: structural, weight: (L-2)*(L-2))
-}
-
-rule Composite {
-    when: text: String
-    let weighted = Σ Tell.weight
-    let sentences = max(1, count of Sentence)
-    ensures: Score.created(weighted: weighted, sentences: sentences,
-                           density: weighted / sentences,
-                           over_threshold: weighted >= config.abs_gate
-                                           and density >= config.density_gate)
-}
-
--- === Invariants (the PBT properties verify these) ===
-
-invariant AnaphoraSuperlinear {
-    -- weight grows as the square of the excess run length
-    for L in Integer where L >= 3:
-        anaphora_weight(L) = (L-2)*(L-2)
-    -- and is non-decreasing in L
-    for L1, L2 where 3 <= L1 <= L2:
-        anaphora_weight(L1) <= anaphora_weight(L2)
-}
-
-invariant AnaphoraPairIsFree {
-    for run of consecutive same-opener Sentences of length L <= 2:
-        no Tell with id "anaphora"
-}
-
-invariant TricolonSpanBound {
-    for s: Sentence where any comma-span has more than config.triad_max_span words:
-        no Tell with id "tricolon"
-}
-
-invariant NegationWithoutPivotIsClean {
-    for s: Sentence containing a negation but no pivot within config.negation_window:
-        no Tell with id "negative-parallelism"
-}
-
-invariant SelfAnsweredFragmentBound {
-    for pair (q, a) where q ends_with "?" and words(a) > 5:
-        no Tell with id "self-answered-question" for that pair
-}
-
-invariant ProseTellsAreAdvisory {
-    -- the checker (host-lint) maps every prose Tell to warn severity, never flag
-    for t: Tell:
-        host_lint_severity(t) = warn
+invariant DensityIsWeightedOverSentences {
+    for score in Scores:
+        score.density = score.weighted / score.sentences
 }
 
 invariant DensityGateRequiresBoth {
-    for text: String:
-        Score.over_threshold implies
-            (Score.weighted >= config.abs_gate and Score.density >= config.density_gate)
+    for score in Scores:
+        score.over_threshold = (score.weighted >= config.abs_gate and score.density >= config.density_gate)
 }
 
-invariant WeightsPositive {
-    for t: Tell:
-        t.weight > 0
-}
-
--- === Parallel scan (plan/0008, call/0015) ===
--- The functional half of the parallel scan. The interleaving/ordering half is
--- specified in plan/0008/spec/ParallelScan.tla (Specula lane).
-
-entity Chunk {
-    index: Integer       -- contiguous position 0..k; chunks tile the sentences
-    sentences: Sequence  -- this chunk's slice
-}
-
-entity Partial {
-    chunk: Chunk
-    per_sentence: Sequence  -- tells for this chunk's sentences, in order
-    metas: Sequence         -- this chunk's per-sentence run summary
-}
-
-rule ScanChunked {
-    when: text: String, k: Integer where k >= 1
-    let chunks = the sentences of text split into <= k contiguous Chunks
-    let partials = for each chunk, Partial(per_sentence: sentence_tells*, metas: sentence_meta*)
-    -- merge in chunk-index order (not completion order)
-    let merged_per_sentence = concat partials.per_sentence by chunk.index
-    let merged_metas = concat partials.metas by chunk.index
-    ensures: result = lexical(text)
-                    ++ merged_per_sentence
-                    ++ run_tells(merged_metas)
-                    ++ shape(text)
-}
-
-invariant ParallelEqualsSequential {
-    -- the merge monoid is concatenation, so a boundary-straddling run rejoins
-    for text: String, k: Integer where k >= 1:
-        scan_chunked(text, k) = scan_prose(text)
-}
-
--- === Markdown-aware scan (plan/0010) ===
-
-entity Block {
-    kind: para | heading | list_item
-    text: String      -- prose only: no code, no link URLs, no markup
-    bold_first: Bool  -- list item whose first inline is bold
-}
-
-rule ScanProseMarkdown {
-    when: md: String  -- a markdown document
-    let blocks = parse_markdown(md)  -- code blocks and inline code dropped; link text kept, URL dropped
-    let body = blocks where kind != heading
-    ensures: result = lexical(all blocks' text)            -- diction incl. headings
-                    ++ per_sentence(body) ++ run(body)     -- equations over body only
-                    ++ markdown_shape(blocks)              -- headings not counted as paragraphs
-}
-
-invariant CodeIsNotProse {
-    for md: String:
-        tells from any fenced or inline code span in md = {}
-}
-
-invariant LinkUrlsAreNotProse {
-    for md: String:
-        a tell token appearing only in a link/image URL (not its visible text) does not fire
-}
-
-invariant HeadingsAreNotRuns {
-    -- parallel section headings must not read as an anaphora/listicle run
-    for md whose only repeated sentence-openers are in headings:
-        no run-equation Tell
+invariant RunTellsAreSuperlinear {
+    -- weight grows as the square of the excess run length
+    for tell in Tells where tell.id = "anaphora" | "listicle":
+        tell.weight >= 1
 }
