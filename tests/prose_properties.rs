@@ -2,8 +2,16 @@
 // invariant in host-grammar.allium. Black-box over the public API (scan_prose /
 // tell_score) so the properties verify the contract, not the implementation.
 
-use host_grammar::{scan_prose, tell_score};
+use host_grammar::{scan_chunked, scan_prose, tell_score, Tell};
 use proptest::prelude::*;
+
+// A Tell's identity for equality: id, exact weight bits, and excerpt.
+fn key(t: &Tell) -> (&'static str, u32, String) {
+    (t.id, t.weight.to_bits(), t.excerpt.clone())
+}
+fn keys(ts: &[Tell]) -> Vec<(&'static str, u32, String)> {
+    ts.iter().map(key).collect()
+}
 
 fn tells_with(text: &str, id: &str) -> Vec<host_grammar::Tell> {
     scan_prose(text).into_iter().filter(|t| t.id == id).collect()
@@ -135,6 +143,26 @@ proptest! {
         let text = doc_from_openers(&openers);
         let engine: f32 = tells_with(&text, "anaphora").iter().map(|t| t.weight).sum();
         prop_assert_eq!(engine, ref_anaphora_weight(&openers), "openers: {:?}", openers);
+    }
+
+    // call/0015 functional invariant: the chunked-parallel scan equals the
+    // sequential scan (same tells, same order) for every chunk count k. The
+    // merge-monoid associativity — boundary-straddling runs rejoin by
+    // concatenation. Built on realistic capitalized sentences so they segment.
+    #[test]
+    fn parallel_equals_sequential_generated(
+        openers in prop::collection::vec(0usize..4, 0..40),
+        k in 1usize..=6,
+    ) {
+        let text = doc_from_openers(&openers);
+        prop_assert_eq!(keys(&scan_chunked(&text, k)), keys(&scan_prose(&text)),
+            "k={}, openers={:?}", k, openers);
+    }
+
+    // Same invariant over arbitrary text (covers lexical, shape, fragments).
+    #[test]
+    fn parallel_equals_sequential_arbitrary(s in ".{0,400}", k in 1usize..=6) {
+        prop_assert_eq!(keys(&scan_chunked(&s, k)), keys(&scan_prose(&s)), "k={}", k);
     }
 
     // invariant WeightsPositive: every emitted tell carries a positive weight.

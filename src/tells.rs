@@ -196,32 +196,43 @@ fn is_triad(sentence: &str) -> bool {
     })
 }
 
+// One sentence's precomputed cross-sentence signals — the unit a parallel worker
+// produces for its chunk. Concatenating chunk Metas in chunk order reproduces the
+// whole-document sequence, so a run straddling a chunk boundary rejoins under
+// concatenation (the associative merge of `call/0015`).
+struct Meta {
+    opener: Option<String>, // first content word past a leading stopword (anaphora)
+    first: String,          // first lowercased word (countdown, listicle); "" if none
+    is_question: bool,      // ends with '?'
+    words: usize,           // word count (self-answered fragment bound)
+}
+
+fn sentence_meta(s: &str) -> Meta {
+    let words = lc_words(s);
+    let first = words.first().cloned().unwrap_or_default();
+    let opener = match words.first() {
+        Some(w) if STOPWORDS.contains(&w.as_str()) => words.get(1).cloned(),
+        other => other.cloned(),
+    };
+    Meta { opener, first, is_question: s.ends_with('?'), words: words.len() }
+}
+
 // Anaphora: consecutive sentences sharing an opener (first content word after a
 // leading stopword). A run of length L scores max(0, L-2)² — superlinear so a
 // pair is free and a marching list is heavy.
 //   anaphora = Σ_runs max(0, L_r − 2)²
-fn opener(sentence: &str) -> Option<String> {
-    let words = lc_words(sentence);
-    let mut it = words.into_iter();
-    let mut first = it.next()?;
-    if STOPWORDS.contains(&first.as_str()) {
-        first = it.next()?;
-    }
-    Some(first)
-}
-
-fn anaphora_runs(sents: &[&str]) -> Vec<(String, usize)> {
+fn anaphora_runs(metas: &[Meta]) -> Vec<(String, usize)> {
     let mut runs: Vec<(String, usize)> = Vec::new();
     let mut cur: Option<String> = None;
     let mut len = 0usize;
-    for s in sents {
-        match opener(s) {
-            Some(o) if Some(&o) == cur.as_ref() => len += 1,
+    for m in metas {
+        match &m.opener {
+            Some(o) if Some(o) == cur.as_ref() => len += 1,
             other => {
                 if let (Some(o), true) = (cur.take(), len >= 3) {
                     runs.push((o, len));
                 }
-                cur = other;
+                cur = other.clone();
                 len = 1;
             }
         }
@@ -234,18 +245,17 @@ fn anaphora_runs(sents: &[&str]) -> Vec<(String, usize)> {
 
 // "Not X. Not Y. Just Z." — a run of ≥2 sentence-initial "Not …" fragments
 // closed by a "Just/Only …". countdown = max(0, run_len) on close.
-fn countdown(sents: &[&str]) -> Vec<usize> {
+fn countdown(metas: &[Meta]) -> Vec<usize> {
     let mut out = Vec::new();
     let mut run = 0usize;
-    for s in sents {
-        let first = lc_words(s).into_iter().next().unwrap_or_default();
-        if first == "not" || first == "no" {
-            run += 1;
-        } else if (first == "just" || first == "only") && run >= 2 {
-            out.push(run + 1);
-            run = 0;
-        } else {
-            run = 0;
+    for m in metas {
+        match m.first.as_str() {
+            "not" | "no" => run += 1,
+            "just" | "only" if run >= 2 => {
+                out.push(run + 1);
+                run = 0;
+            }
+            _ => run = 0,
         }
     }
     out
@@ -253,28 +263,21 @@ fn countdown(sents: &[&str]) -> Vec<usize> {
 
 // Self-answered question: a "?"-terminated sentence immediately followed by a
 // short fragment (≤ 5 words). Counts adjacencies.
-fn self_answered(sents: &[&str]) -> usize {
-    let mut hits = 0;
-    for pair in sents.windows(2) {
-        if pair[0].ends_with('?') {
-            let n = lc_words(pair[1]).len();
-            if n >= 1 && n <= 5 {
-                hits += 1;
-            }
-        }
-    }
-    hits
+fn self_answered(metas: &[Meta]) -> usize {
+    metas
+        .windows(2)
+        .filter(|p| p[0].is_question && p[1].words >= 1 && p[1].words <= 5)
+        .count()
 }
 
 // Listicle-in-prose: consecutive sentences led by ordinals. An anaphora variant
 // over ORDINALS; a run ≥3 scores like anaphora.
-fn listicle(sents: &[&str]) -> usize {
+fn listicle(metas: &[Meta]) -> usize {
     let mut run = 0usize;
     let mut score = 0usize;
     let flush = |run: usize| if run >= 3 { (run - 2) * (run - 2) } else { 0 };
-    for s in sents {
-        let first = lc_words(s).into_iter().next().unwrap_or_default();
-        if ORDINALS.contains(&first.as_str()) {
+    for m in metas {
+        if ORDINALS.contains(&m.first.as_str()) {
             run += 1;
         } else {
             score += flush(run);
@@ -342,62 +345,59 @@ fn shape(text: &str, out: &mut Vec<Tell>) {
     }
 }
 
-/// Scan prose for every detectable agentic tell (lexical + structural).
-pub fn scan_prose(text: &str) -> Vec<Tell> {
-    let mut out = Vec::new();
-    lexical(text, &mut out);
-    let sents = sentences(text);
-
-    for s in &sents {
-        for _ in 0..negative_parallelism(s) {
-            out.push(Tell {
-                id: "negative-parallelism",
-                kind: Kind::Structural,
-                excerpt: (*s).to_string(),
-                weight: 1.2,
-                cite: "tropes.fyi: negative parallelism (antithesis)",
-            });
-        }
-        if is_triad(s) {
-            out.push(Tell {
-                id: "tricolon",
-                kind: Kind::Structural,
-                excerpt: (*s).to_string(),
-                weight: 0.9,
-                cite: "tropes.fyi: tricolon (classical rhetoric)",
-            });
-        }
-        if ing_tail(s) {
-            out.push(Tell {
-                id: "ing-tail",
-                kind: Kind::Structural,
-                excerpt: (*s).to_string(),
-                weight: 0.7,
-                cite: "tropes.fyi: participial tail",
-            });
-        }
-        for _ in 0..false_ranges(s) {
-            out.push(Tell {
-                id: "false-range",
-                kind: Kind::Structural,
-                excerpt: (*s).to_string(),
-                weight: 0.5,
-                cite: "tropes.fyi: false range / spectrum",
-            });
-        }
+// Per-sentence structural tells (independent of neighbours) — the embarrassingly
+// parallel unit, appended in sentence order.
+fn sentence_tells(s: &str, out: &mut Vec<Tell>) {
+    for _ in 0..negative_parallelism(s) {
+        out.push(Tell {
+            id: "negative-parallelism",
+            kind: Kind::Structural,
+            excerpt: s.to_string(),
+            weight: 1.2,
+            cite: "tropes.fyi: negative parallelism (antithesis)",
+        });
     }
+    if is_triad(s) {
+        out.push(Tell {
+            id: "tricolon",
+            kind: Kind::Structural,
+            excerpt: s.to_string(),
+            weight: 0.9,
+            cite: "tropes.fyi: tricolon (classical rhetoric)",
+        });
+    }
+    if ing_tail(s) {
+        out.push(Tell {
+            id: "ing-tail",
+            kind: Kind::Structural,
+            excerpt: s.to_string(),
+            weight: 0.7,
+            cite: "tropes.fyi: participial tail",
+        });
+    }
+    for _ in 0..false_ranges(s) {
+        out.push(Tell {
+            id: "false-range",
+            kind: Kind::Structural,
+            excerpt: s.to_string(),
+            weight: 0.5,
+            cite: "tropes.fyi: false range / spectrum",
+        });
+    }
+}
 
-    for (op, len) in anaphora_runs(&sents) {
-        let w = ((len - 2) * (len - 2)) as f32;
+// Cross-sentence run equations over the merged per-sentence metadata.
+fn run_tells(metas: &[Meta], out: &mut Vec<Tell>) {
+    for (op, len) in anaphora_runs(metas) {
         out.push(Tell {
             id: "anaphora",
             kind: Kind::Structural,
             excerpt: format!("{len} sentences open with \"{op}\""),
-            weight: w,
+            weight: ((len - 2) * (len - 2)) as f32,
             cite: "tropes.fyi: anaphora (classical rhetoric)",
         });
     }
-    for len in countdown(&sents) {
+    for len in countdown(metas) {
         out.push(Tell {
             id: "countdown",
             kind: Kind::Structural,
@@ -406,8 +406,7 @@ pub fn scan_prose(text: &str) -> Vec<Tell> {
             cite: "tropes.fyi: countdown / triadic close",
         });
     }
-    let sa = self_answered(&sents);
-    for _ in 0..sa {
+    for _ in 0..self_answered(metas) {
         out.push(Tell {
             id: "self-answered-question",
             kind: Kind::Structural,
@@ -416,7 +415,7 @@ pub fn scan_prose(text: &str) -> Vec<Tell> {
             cite: "tropes.fyi: self-answered question (hypophora)",
         });
     }
-    let lst = listicle(&sents);
+    let lst = listicle(metas);
     if lst > 0 {
         out.push(Tell {
             id: "listicle",
@@ -426,9 +425,84 @@ pub fn scan_prose(text: &str) -> Vec<Tell> {
             cite: "tropes.fyi: listicle-in-prose",
         });
     }
+}
 
+// Assemble the document result from per-sentence tells (in sentence order) and
+// the merged metadata. Output order: lexical, per-sentence, run, shape — the one
+// order both the sequential and parallel paths produce.
+fn assemble(text: &str, per_sentence: Vec<Tell>, metas: &[Meta]) -> Vec<Tell> {
+    let mut out = Vec::new();
+    lexical(text, &mut out);
+    out.extend(per_sentence);
+    run_tells(metas, &mut out);
     shape(text, &mut out);
     out
+}
+
+/// Scan prose for every detectable agentic tell (lexical + structural).
+pub fn scan_prose(text: &str) -> Vec<Tell> {
+    let sents = sentences(text);
+    let mut per_sentence = Vec::new();
+    let mut metas = Vec::with_capacity(sents.len());
+    for s in &sents {
+        sentence_tells(s, &mut per_sentence);
+        metas.push(sentence_meta(s));
+    }
+    assemble(text, per_sentence, &metas)
+}
+
+/// Below this sentence count, `scan_prose_parallel` stays sequential — thread
+/// setup is not worth it for short documents and titles.
+const PARALLEL_THRESHOLD: usize = 64;
+
+/// Parallel scan for large documents. Result is identical to `scan_prose`; the
+/// per-sentence tokenization is split across available cores above the threshold.
+pub fn scan_prose_parallel(text: &str) -> Vec<Tell> {
+    if sentences(text).len() < PARALLEL_THRESHOLD {
+        return scan_prose(text);
+    }
+    let k = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    scan_chunked(text, k)
+}
+
+/// `scan_prose` computed in up to `k` contiguous sentence chunks, each scanned on
+/// its own thread. For every `k >= 1` the result equals `scan_prose(text)` — the
+/// invariant the allium/PBT lane checks and the TLA+ spec models across all
+/// worker-completion interleavings. Public so the property lane can force `k`.
+pub fn scan_chunked(text: &str, k: usize) -> Vec<Tell> {
+    let sents = sentences(text);
+    let k = k.min(sents.len()).max(1);
+    if k <= 1 {
+        return scan_prose(text);
+    }
+    let chunk = (sents.len() + k - 1) / k;
+    // Each worker owns its chunk and shares no mutable state; it returns its
+    // per-sentence tells and its metadata (the chunk's run summary).
+    let partials: Vec<(Vec<Tell>, Vec<Meta>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = sents
+            .chunks(chunk)
+            .map(|slice| {
+                scope.spawn(move || {
+                    let mut ts = Vec::new();
+                    let mut ms = Vec::with_capacity(slice.len());
+                    for &s in slice {
+                        sentence_tells(s, &mut ts);
+                        ms.push(sentence_meta(s));
+                    }
+                    (ts, ms)
+                })
+            })
+            .collect();
+        // Join in chunk order (not completion order) so the merge is deterministic.
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let mut per_sentence = Vec::new();
+    let mut metas = Vec::with_capacity(sents.len());
+    for (ts, ms) in partials {
+        per_sentence.extend(ts);
+        metas.extend(ms);
+    }
+    assemble(text, per_sentence, &metas)
 }
 
 // Over-threshold needs high absolute weight AND high density (conservative; tune with fixtures).
@@ -437,7 +511,7 @@ const DENSITY_GATE: f32 = 0.6;
 
 /// Aggregate the tells of `text` into a document `Score`.
 pub fn tell_score(text: &str) -> Score {
-    let tells = scan_prose(text);
+    let tells = scan_prose_parallel(text);
     let weighted: f32 = tells.iter().map(|t| t.weight).sum();
     let sentences = sentences(text).len().max(1);
     let density = weighted / sentences as f32;

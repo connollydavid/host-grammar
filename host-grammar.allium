@@ -127,3 +127,37 @@ invariant WeightsPositive {
     for t: Tell:
         t.weight > 0
 }
+
+-- === Parallel scan (plan/0008, call/0015) ===
+-- The functional half of the parallel scan. The interleaving/ordering half is
+-- specified in plan/0008/spec/ParallelScan.tla (Specula lane).
+
+entity Chunk {
+    index: Integer       -- contiguous position 0..k; chunks tile the sentences
+    sentences: Sequence  -- this chunk's slice
+}
+
+entity Partial {
+    chunk: Chunk
+    per_sentence: Sequence  -- tells for this chunk's sentences, in order
+    metas: Sequence         -- this chunk's per-sentence run summary
+}
+
+rule ScanChunked {
+    when: text: String, k: Integer where k >= 1
+    let chunks = the sentences of text split into <= k contiguous Chunks
+    let partials = for each chunk, Partial(per_sentence: sentence_tells*, metas: sentence_meta*)
+    -- merge in chunk-index order (not completion order)
+    let merged_per_sentence = concat partials.per_sentence by chunk.index
+    let merged_metas = concat partials.metas by chunk.index
+    ensures: result = lexical(text)
+                    ++ merged_per_sentence
+                    ++ run_tells(merged_metas)
+                    ++ shape(text)
+}
+
+invariant ParallelEqualsSequential {
+    -- the merge monoid is concatenation, so a boundary-straddling run rejoins
+    for text: String, k: Integer where k >= 1:
+        scan_chunked(text, k) = scan_prose(text)
+}
