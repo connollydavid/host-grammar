@@ -19,3 +19,5 @@ jobs:
         run: allium check host-grammar.allium
       - name: allium analyse
         run: allium analyse host-grammar.allium
+      - name: allium plan (test obligations)
+        run: allium plan host-grammar.allium
