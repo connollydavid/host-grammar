@@ -1,0 +1,50 @@
+# host-grammar.obligations — disposition for every `allium plan` obligation.
+# `host-lifecycle obligations host-grammar.allium --tests tests` checks completeness.
+#   <id> => test:<name> | structural | waived: <reason>
+
+# --- Spec-integrity (covered by the check/analyse lane) ---
+config-default.negation_window   => structural
+config-default.triad_max_span    => structural
+config-default.abs_gate          => structural
+config-default.density_gate      => structural
+enum-comparable.TellKind         => structural
+entity-fields.Document           => structural
+entity-optional.Document.score   => structural
+entity-fields.Sentence           => structural
+entity-fields.Run                => structural
+entity-fields.Tell               => structural
+entity-fields.Score              => structural
+
+# --- Structural-equation rules (behavioural — named property tests) ---
+rule-success.DetectTricolon                  => test:short_triad_is_a_tricolon
+rule-failure.DetectTricolon.1                => test:long_span_is_not_a_tricolon
+rule-entity-creation.DetectTricolon.1        => test:short_triad_is_a_tricolon
+rule-success.DetectNegativeParallelism       => test:negation_with_pivot_fires
+rule-failure.DetectNegativeParallelism.1     => test:negation_without_pivot_is_clean
+rule-entity-creation.DetectNegativeParallelism.1 => test:negation_with_pivot_fires
+rule-success.DetectSelfAnsweredQuestion      => test:question_plus_short_fragment_fires
+rule-failure.DetectSelfAnsweredQuestion.1    => test:question_plus_long_answer_is_clean
+rule-entity-creation.DetectSelfAnsweredQuestion.1 => test:question_plus_short_fragment_fires
+rule-success.DetectAnaphora                  => test:anaphora_counts_the_tail_run
+rule-failure.DetectAnaphora.1                => test:anaphora_pair_is_free
+rule-entity-creation.DetectAnaphora.1        => test:anaphora_counts_the_tail_run
+rule-success.DetectListicle                  => test:ordinal_run_is_a_listicle
+rule-failure.DetectListicle.1                => waived: no dedicated negative-listicle PBT; a non-ordinal run is covered by anaphora_pair_is_free's run-length floor — a follow-on test
+rule-entity-creation.DetectListicle.1        => test:ordinal_run_is_a_listicle
+rule-success.DetectCountdown                 => test:countdown_fires_on_closed_run
+rule-failure.DetectCountdown.1               => waived: no dedicated negative-countdown PBT; an unclosed "Not…" run is covered by clean_technical_prose_is_silent — a follow-on test
+rule-entity-creation.DetectCountdown.1       => test:countdown_fires_on_closed_run
+
+# --- ing-tail / false-range: added in plan/0015; no dedicated PBT yet ---
+rule-success.DetectIngTail                   => waived: ing-tail has no dedicated property test yet (added plan/0015); covered by the tells.rs scan unit tests — a follow-on PBT
+rule-failure.DetectIngTail.1                 => waived: see rule-success.DetectIngTail
+rule-entity-creation.DetectIngTail.1         => waived: see rule-success.DetectIngTail
+rule-success.DetectFalseRange                => waived: false-range has no dedicated property test yet (added plan/0015); covered by the tells.rs scan unit tests — a follow-on PBT
+rule-failure.DetectFalseRange.1              => waived: see rule-success.DetectFalseRange
+rule-entity-creation.DetectFalseRange.1      => waived: see rule-success.DetectFalseRange
+
+# --- Invariants ---
+invariant.WeightsPositive                    => test:every_tell_has_positive_weight
+invariant.DensityIsWeightedOverSentences     => test:density_gate_requires_both
+invariant.DensityGateRequiresBoth            => test:density_gate_requires_both
+invariant.RunTellsAreSuperlinear             => test:anaphora_weight_is_excess_squared
