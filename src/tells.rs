@@ -144,10 +144,6 @@ fn lexical(text: &str, out: &mut Vec<Tell>) {
                         weight: lex.weight,
                         cite: lex.cite,
                     });
-                    if decoration {
-                        // one decoration tell per phrase is enough signal
-                        break;
-                    }
                 }
                 from = end;
             }
@@ -702,6 +698,13 @@ mod tests {
     fn lexical_fires_on_diction_not_on_clean() {
         assert!(ids("We delve into the rich tapestry.").contains(&"ai-diction"));
         assert!(!ids("We read the source file carefully.").contains(&"ai-diction"));
+    }
+
+    #[test]
+    fn every_decoration_occurrence_is_reported() {
+        // Each em-dash is its own actionable finding, not just the first.
+        let n = scan_prose("a — b — c — d.").iter().filter(|t| t.id == "decoration").count();
+        assert_eq!(n, 3);
     }
 
     #[test]
