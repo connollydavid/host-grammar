@@ -1,2 +1,6 @@
 /target
 Cargo.lock
+_apalache-out/
+/.tools
+*.toolbox
+*.tlaps/

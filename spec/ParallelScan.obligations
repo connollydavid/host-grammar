@@ -1,0 +1,13 @@
+# spec/ParallelScan.obligations — deep-verification tier declarations for the
+# ParallelScan TLA+ specs (host-prove). These are distinct from the allium
+# obligations in host-grammar.obligations: they ACTIVATE the symbolic + proof
+# lanes. `host-lifecycle software --check` requires each declared tier to have a
+# matching CI lane (apalache-mc / tlapm) — opt-in, inert until declared here.
+#   <id> => apalache:<inv> | tlaps:<theorem>
+#
+# Apalache (symbolic/SMT): the index-ordered tiling reconstructs the input for
+# EVERY (N,K) with 1<=K<=N — the parametric half bounded TLC can only sample.
+scan-reconstruction.parametric => apalache:Reconstructs
+# TLAPS (deductive): every worker index is a valid position index, proved for all
+# (N,K) — the unbounded half neither TLC nor symbolic checking closes.
+worker-index.bounds            => tlaps:WorkerIndexInBounds
