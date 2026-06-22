@@ -1,6 +1,6 @@
 [package]
 name = "host-grammar"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Shared rules for valid agentic-host names and numbers — the grammar both the no-phase checker and the host-lifecycle generator defer to."
 license = "Unlicense"
