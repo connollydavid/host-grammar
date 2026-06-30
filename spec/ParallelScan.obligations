@@ -5,8 +5,10 @@
 # matching CI lane (apalache-mc / tlapm) — opt-in, inert until declared here.
 #   <id> => apalache:<inv> | tlaps:<theorem>
 #
-# Apalache (symbolic/SMT): the index-ordered tiling reconstructs the input for
-# EVERY (N,K) with 1<=K<=N — the parametric half bounded TLC can only sample.
+# Apalache (symbolic/SMT): the index-ordered tiling reconstructs the input across
+# the symbolic box CInit admits (2 <= N <= 8, 1 <= K <= N) — the parametric half
+# bounded TLC can only sample one instance of. The fully unbounded claim is the
+# TLAPS rung below.
 scan-reconstruction.parametric => apalache:Reconstructs
 # TLAPS (deductive): every worker index is a valid position index, proved for all
 # (N,K) — the unbounded half neither TLC nor symbolic checking closes.

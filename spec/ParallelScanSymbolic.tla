@@ -38,7 +38,10 @@ Hi(i) == IF i * ChunkLen > N THEN N ELSE i * ChunkLen
 \* symbolic sizes (the standard Apalache idiom for symbolic-size quantification).
 MaxBound == 8
 
-\* Symbolic constant family: prove the property for every (N,K) with 1 <= K <= N.
+\* Symbolic constant family: prove the property across the box 2 <= N <= MaxBound
+\* and 1 <= K <= N (the N=1 single-chunk case is trivial and the TLAPS rung covers
+\* the unbounded index claim). Apalache samples no single (N,K); it discharges the
+\* whole box symbolically.
 CInit ==
     /\ N \in 2..MaxBound
     /\ K \in 1..MaxBound

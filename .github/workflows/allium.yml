@@ -22,6 +22,6 @@ jobs:
       - name: allium plan (test obligations)
         run: allium plan host-grammar.allium
       - name: Install host-lifecycle (pinned)
-        run: cargo install --git https://github.com/connollydavid/host-lifecycle --rev d91dae3
+        run: cargo install --git https://github.com/connollydavid/host-lifecycle --rev 08ba98b
       - name: Discharge obligations (every obligation dispositioned, test refs exist)
         run: host-lifecycle obligations host-grammar.allium --tests tests

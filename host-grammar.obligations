@@ -29,22 +29,22 @@ rule-success.DetectAnaphora                  => test:anaphora_counts_the_tail_ru
 rule-failure.DetectAnaphora.1                => test:anaphora_pair_is_free
 rule-entity-creation.DetectAnaphora.1        => test:anaphora_counts_the_tail_run
 rule-success.DetectListicle                  => test:ordinal_run_is_a_listicle
-rule-failure.DetectListicle.1                => waived: no dedicated negative-listicle PBT; a non-ordinal run is covered by anaphora_pair_is_free's run-length floor — a follow-on test
+rule-failure.DetectListicle.1                => test:non_ordinal_run_is_not_a_listicle
 rule-entity-creation.DetectListicle.1        => test:ordinal_run_is_a_listicle
 rule-success.DetectCountdown                 => test:countdown_fires_on_closed_run
-rule-failure.DetectCountdown.1               => waived: no dedicated negative-countdown PBT; an unclosed "Not…" run is covered by clean_technical_prose_is_silent — a follow-on test
+rule-failure.DetectCountdown.1               => test:unclosed_not_run_is_not_a_countdown
 rule-entity-creation.DetectCountdown.1       => test:countdown_fires_on_closed_run
 
-# --- ing-tail / false-range: added in plan/0015; no dedicated PBT yet ---
-rule-success.DetectIngTail                   => waived: ing-tail has no dedicated property test yet (added plan/0015); covered by the tells.rs scan unit tests — a follow-on PBT
-rule-failure.DetectIngTail.1                 => waived: see rule-success.DetectIngTail
-rule-entity-creation.DetectIngTail.1         => waived: see rule-success.DetectIngTail
-rule-success.DetectFalseRange                => waived: false-range has no dedicated property test yet (added plan/0015); covered by the tells.rs scan unit tests — a follow-on PBT
-rule-failure.DetectFalseRange.1              => waived: see rule-success.DetectFalseRange
-rule-entity-creation.DetectFalseRange.1      => waived: see rule-success.DetectFalseRange
+# --- ing-tail / false-range (added plan/0015; property tests added plan/0053) ---
+rule-success.DetectIngTail                   => test:ing_tail_fires_on_gerund_tail
+rule-failure.DetectIngTail.1                 => test:plain_sentence_has_no_ing_tail
+rule-entity-creation.DetectIngTail.1         => test:ing_tail_fires_on_gerund_tail
+rule-success.DetectFalseRange                => test:false_range_fires_on_from_to
+rule-failure.DetectFalseRange.1              => test:no_from_to_is_clean
+rule-entity-creation.DetectFalseRange.1      => test:false_range_fires_on_from_to
 
 # --- Invariants ---
 invariant.WeightsPositive                    => test:every_tell_has_positive_weight
-invariant.DensityIsWeightedOverSentences     => test:density_gate_requires_both
+invariant.DensityIsWeightedOverSentences     => test:density_is_weighted_over_sentences
 invariant.DensityGateRequiresBoth            => test:density_gate_requires_both
-invariant.RunTellsAreSuperlinear             => test:anaphora_weight_is_excess_squared
+invariant.RunTellsAreSuperlinear             => test:run_tells_are_superlinear

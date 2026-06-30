@@ -3,6 +3,14 @@
 -- Token-free prose equations and their composite density score. Naming-tell
 -- detection (is_numeral / is_valid_name) is specified in host-lint.allium; the
 -- parallel-scan interleaving is specified in ParallelScan.tla (Specula lane).
+--
+-- Scope: this spec models the per-sentence and run STRUCTURAL equations and the
+-- density composite. Two further tell families the engine emits are out of the
+-- rule model by design: the lexical diction corpus (a data-driven phrase table,
+-- emitted as the `lexical` kind) and the document-shape tells (punchy-fragments,
+-- bold-first-bullets, whose weights scale with a paragraph or bullet ratio rather
+-- than a fixed constant). Both are verified by the engine's unit tests, not by
+-- allium rules.
 
 config {
     negation_window: Integer = 6
@@ -65,31 +73,31 @@ entity Score {
 rule DetectTricolon {
     when: sentence: Sentence.created
     requires: sentence.is_triad
-    ensures: Tell.created(document: sentence.document, id: "tricolon", kind: structural, weight: 0.9, cite: "tropes.fyi/tricolon")
+    ensures: Tell.created(document: sentence.document, id: "tricolon", kind: structural, weight: 0.9, cite: "tropes.fyi: tricolon (classical rhetoric)")
 }
 
 rule DetectNegativeParallelism {
     when: sentence: Sentence.created
     requires: sentence.negation_with_pivot
-    ensures: Tell.created(document: sentence.document, id: "negative-parallelism", kind: structural, weight: 1.2, cite: "tropes.fyi/negative-parallelism")
+    ensures: Tell.created(document: sentence.document, id: "negative-parallelism", kind: structural, weight: 1.2, cite: "tropes.fyi: negative parallelism (antithesis)")
 }
 
 rule DetectSelfAnsweredQuestion {
     when: sentence: Sentence.created
     requires: sentence.is_question and sentence.followed_by_short_fragment
-    ensures: Tell.created(document: sentence.document, id: "self-answered-question", kind: structural, weight: 1.0, cite: "tropes.fyi/self-answered-question")
+    ensures: Tell.created(document: sentence.document, id: "self-answered-question", kind: structural, weight: 1.0, cite: "tropes.fyi: self-answered question (hypophora)")
 }
 
 rule DetectIngTail {
     when: sentence: Sentence.created
     requires: sentence.has_ing_tail
-    ensures: Tell.created(document: sentence.document, id: "ing-tail", kind: structural, weight: 0.7, cite: "tropes.fyi/ing-tail")
+    ensures: Tell.created(document: sentence.document, id: "ing-tail", kind: structural, weight: 0.7, cite: "tropes.fyi: participial tail")
 }
 
 rule DetectFalseRange {
     when: sentence: Sentence.created
     requires: sentence.has_false_range
-    ensures: Tell.created(document: sentence.document, id: "false-range", kind: structural, weight: 0.5, cite: "tropes.fyi/false-range")
+    ensures: Tell.created(document: sentence.document, id: "false-range", kind: structural, weight: 0.5, cite: "tropes.fyi: false range / spectrum")
 }
 
 -- === Run tells score superlinearly: weight = (L - 2)^2 for runs of length >= 3 ===
@@ -97,23 +105,28 @@ rule DetectFalseRange {
 rule DetectAnaphora {
     when: run: Run.created
     requires: run.length >= 3 and not run.ordinal_led
-    ensures: Tell.created(document: run.document, id: "anaphora", kind: structural, weight: (run.length - 2) * (run.length - 2), cite: "rhetoric/anaphora")
+    ensures: Tell.created(document: run.document, id: "anaphora", kind: structural, weight: (run.length - 2) * (run.length - 2), cite: "tropes.fyi: anaphora (classical rhetoric)")
 }
 
 rule DetectListicle {
     when: run: Run.created
     requires: run.length >= 3 and run.ordinal_led
-    ensures: Tell.created(document: run.document, id: "listicle", kind: structural, weight: (run.length - 2) * (run.length - 2), cite: "tropes.fyi/listicle-in-prose")
+    ensures: Tell.created(document: run.document, id: "listicle", kind: structural, weight: (run.length - 2) * (run.length - 2), cite: "tropes.fyi: listicle-in-prose")
 }
 
 -- A "Not… / Just…" countdown run scores a fixed weight, independent of length.
 rule DetectCountdown {
     when: run: Run.created
     requires: run.is_countdown
-    ensures: Tell.created(document: run.document, id: "countdown", kind: structural, weight: 1.3, cite: "tropes.fyi/countdown")
+    ensures: Tell.created(document: run.document, id: "countdown", kind: structural, weight: 1.3, cite: "tropes.fyi: countdown / triadic close")
 }
 
 -- === Invariants (the property-based tests verify these) ===
+--
+-- The Decimal weights and gates abstract an f32 implementation, so the density
+-- equalities below hold within a float epsilon, not bit-exactly. The implementation
+-- floors the sentence count at 1 (score.sentences = max(1, count)), so the division
+-- below is always well-defined even for an empty document.
 
 invariant WeightsPositive {
     for tell in Tells:

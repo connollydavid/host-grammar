@@ -32,6 +32,11 @@ VARIABLES done,    \* [1..K -> BOOLEAN]  worker i has completed
 vars == << done, result >>
 
 \* Contiguous ceil-division tiling, matching scan_chunked's chunk = ceil(N/K).
+\* This model spawns exactly K workers; for some (N,K) the trailing workers get an
+\* empty SubSeq (Lo(i) > Hi(i)). The implementation instead spawns only the <= K
+\* non-empty chunks slice::chunks yields. Both are the same contiguous partition of
+\* 1..N, so reconstruction holds for either; the empty trailing chunks here are just
+\* threads the implementation does not bother to spawn.
 ChunkLen == (Len(Sentences) + K - 1) \div K
 Lo(i) == (i - 1) * ChunkLen + 1
 Hi(i) == IF i * ChunkLen > Len(Sentences) THEN Len(Sentences) ELSE i * ChunkLen

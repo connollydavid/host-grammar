@@ -54,6 +54,11 @@ jobs:
       - name: Prove WorkerIndexInBounds for all (N,K)
         working-directory: spec
         run: |
+          # Bind the gate to the declared theorem: a rename or deletion of
+          # WorkerIndexInBounds (the obligation in ParallelScan.obligations) must
+          # fail here, not pass vacuously on some other proved obligation.
+          grep -q "THEOREM WorkerIndexInBounds" ChunkBounds.tla \
+            || { echo "::error::ChunkBounds.tla no longer declares THEOREM WorkerIndexInBounds"; exit 1; }
           out=$(tlapm --toolbox 0 0 ChunkBounds.tla 2>&1)
           echo "$out"
           echo "$out" | grep -q "status:failed" && { echo "::error::a TLAPS obligation failed"; exit 1; }

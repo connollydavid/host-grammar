@@ -139,7 +139,7 @@ proptest! {
         // a final run of `tail` sentences all sharing opener index 0, preceded by
         // a differing opener so the tail is its own maximal run
         let mut openers = prefix.iter().map(|&o| (o % 3) + 1).collect::<Vec<_>>();
-        openers.extend(std::iter::repeat(0).take(tail));
+        openers.extend(std::iter::repeat_n(0, tail));
         let text = doc_from_openers(&openers);
         let engine: f32 = tells_with(&text, "anaphora").iter().map(|t| t.weight).sum();
         prop_assert_eq!(engine, ref_anaphora_weight(&openers), "openers: {:?}", openers);
@@ -188,5 +188,74 @@ proptest! {
         let clean = "The parser reads each line and reports the first tell it finds. \
                      A missing allow-list file means no phrases are masked.";
         prop_assert!(!tell_score(clean).over_threshold);
+    }
+
+    // rule DetectIngTail: a trailing participial clause fires the tell.
+    #[test]
+    fn ing_tail_fires_on_gerund_tail(x in "[a-z]{3,8}", y in "[a-z]{3,8}") {
+        let text = format!("We shipped the {x}, highlighting the {y}.");
+        prop_assert!(!tells_with(&text, "ing-tail").is_empty(), "text: {}", text);
+    }
+
+    // rule DetectIngTail negative: a sentence with no trailing clause is clean.
+    #[test]
+    fn plain_sentence_has_no_ing_tail(x in "[a-z]{3,8}", y in "[a-z]{3,8}") {
+        let text = format!("We shipped the {x} {y} today.");
+        prop_assert!(tells_with(&text, "ing-tail").is_empty(), "text: {}", text);
+    }
+
+    // rule DetectFalseRange: a "from X to Y" span fires the tell.
+    #[test]
+    fn false_range_fires_on_from_to(x in "[a-z]{3,8}", y in "[a-z]{3,8}") {
+        let text = format!("It scales from {x} to {y}.");
+        prop_assert!(!tells_with(&text, "false-range").is_empty(), "text: {}", text);
+    }
+
+    // rule DetectFalseRange negative: no "from … to" span is clean.
+    #[test]
+    fn no_from_to_is_clean(x in "[a-z]{3,8}", y in "[a-z]{3,8}") {
+        let text = format!("It scales the {x} {y} well.");
+        prop_assert!(tells_with(&text, "false-range").is_empty(), "text: {}", text);
+    }
+
+    // invariant DensityIsWeightedOverSentences: density is exactly weighted over
+    // the (floored) sentence count — the formula, not the gate.
+    #[test]
+    fn density_is_weighted_over_sentences(s in ".{0,400}") {
+        let score = tell_score(&s);
+        prop_assert_eq!(score.density, score.weighted / score.sentences as f32, "score: {:?}", score);
+    }
+
+    // invariant RunTellsAreSuperlinear: both arms (anaphora and listicle) emit a
+    // tell whose weight is the excess-length squared, hence >= 1 for a run of >= 3.
+    #[test]
+    fn run_tells_are_superlinear(l in 3usize..=7) {
+        let an_text: String = (0..l).map(|i| format!("We do thing{i}. ")).collect();
+        let an = tells_with(&an_text, "anaphora");
+        prop_assert_eq!(an.len(), 1, "anaphora text: {}", an_text);
+        prop_assert_eq!(an[0].weight, ((l - 2) * (l - 2)) as f32);
+        prop_assert!(an[0].weight >= 1.0);
+
+        let li_text: String = (0..l).map(|_| "Next we move. ".to_string()).collect();
+        let li = tells_with(&li_text, "listicle");
+        prop_assert_eq!(li.len(), 1, "listicle text: {}", li_text);
+        prop_assert_eq!(li[0].weight, ((l - 2) * (l - 2)) as f32);
+        prop_assert!(li[0].weight >= 1.0);
+    }
+
+    // rule DetectCountdown negative: a negated run with no "Just/Only" closer does
+    // not fire countdown.
+    #[test]
+    fn unclosed_not_run_is_not_a_countdown(k in 2usize..=5) {
+        let text: String = (0..k).map(|i| format!("Not thing{i}. ")).collect();
+        prop_assert!(tells_with(&text, "countdown").is_empty(), "text: {}", text);
+    }
+
+    // rule DetectListicle negative: a non-ordinal run of length >= 3 is an
+    // anaphora, never a listicle (the ordinal discriminator).
+    #[test]
+    fn non_ordinal_run_is_not_a_listicle(l in 3usize..=6) {
+        let text: String = (0..l).map(|i| format!("We do thing{i}. ")).collect();
+        prop_assert!(tells_with(&text, "listicle").is_empty(), "text: {}", text);
     }
 }
