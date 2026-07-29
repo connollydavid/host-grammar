@@ -54,15 +54,48 @@ struct Lexeme {
 
 // Lexical layer: public-domain phrases, low weights (one word is never a verdict).
 const CORPUS: &[Lexeme] = &[
+    // The catalog's two word-choice entries are two rules here, not one, so a verdict
+    // names the trope it actually matched (call/0051). A third carries this project's
+    // own additions, which the catalog does not contain and which must not cite it.
     Lexeme {
         id: "ai-diction",
         phrases: &[
-            "delve", "utilize", "leverage", "robust", "streamline", "harness",
-            "tapestry", "landscape", "realm", "paradigm", "synergy", "ecosystem",
-            "underscore", "showcase", "intricate", "nuanced", "multifaceted",
+            "delve", "certainly", "utilize", "robust", "streamline",
+            // The catalog lists `harness` and qualifies `leverage` as "(as a verb)".
+            // Both carry a noun this project uses as a term of art, so the qualifier
+            // is applied to both: a test harness, a proof harness (Kani's own name
+            // for a #[kani::proof]) and an agent harness are engineering English
+            // older than the register this rule detects, and the noun accounts for
+            // every one of the 157 occurrences here. Matched by the object or by an
+            // unambiguously verbal inflection, never by a bare token or a bare
+            // determiner: "harness the" alone would fire on the perfectly ordinary
+            // "the agent harness the operator runs".
+            "harness the power", "harness the potential",
+            "harnesses the power", "harnesses the potential",
+            "harnessing the power", "harnessing the potential",
+            "harnessed the power", "harnessed the potential",
+            "to leverage", "leveraging", "leverages",
         ],
         weight: 0.5,
-        cite: "tropes.fyi: AI vocabulary",
+        cite: "tropes.fyi: Delve and Friends",
+    },
+    Lexeme {
+        id: "grandiose-noun",
+        phrases: &[
+            "tapestry", "landscape", "paradigm", "synergy", "ecosystem",
+            // The catalog also lists `framework` here. It is held out on the same
+            // evidence that retired the bare `harness`: all six occurrences in this
+            // corpus name a real one (a merge-driver framework, a deep-learning
+            // framework). Add it when a corpus shows the grandiose sense, not before.
+        ],
+        weight: 0.5,
+        cite: "tropes.fyi: Tapestry and Landscape",
+    },
+    Lexeme {
+        id: "house-diction",
+        phrases: &["realm", "underscore", "showcase", "intricate", "nuanced", "multifaceted"],
+        weight: 0.5,
+        cite: "this project, not in the tropes.fyi catalog (call/0051)",
     },
     Lexeme {
         id: "magic-adverb",
@@ -782,9 +815,58 @@ mod tests {
     #[test]
     fn trope_dense_paragraph_crosses_threshold() {
         let dense = "Let's unpack this. It's not a tweak, it's a revolution. \
-                     We delve. We leverage. We harness. The result? Pure synergy. \
+                     We delve. We leverage. We utilize. The result? Pure synergy. \
                      Fast, clean, and robust.";
         assert!(tell_score(dense).over_threshold);
+    }
+
+    // The bare word over-fired on 117 legitimate nouns across the host and the
+    // template and caught nothing: the only slop-verb uses in either corpus were
+    // the two LEXICON comments quoting it to justify declaring it. Asserted as a
+    // split, because a rule that detected nothing at all would also satisfy the
+    // clear half on its own.
+    #[test]
+    fn harness_flags_as_a_verb_and_clears_as_a_noun() {
+        for slop in [
+            "We harness the power of modern tooling to ship faster than before.",
+            "The runtime harnesses the power of every core the machine reports.",
+            "The platform is harnessing the potential of every team that adopts it.",
+            "It harnessed the potential of a corpus nobody had measured before.",
+        ] {
+            assert!(
+                scan_prose(slop).iter().any(|t| t.id == "ai-diction"),
+                "the slop verb must still flag: {slop}"
+            );
+        }
+        for domain in [
+            "The proof harness runs under Kani and reports one verdict.",
+            "Each agent harness reads the manifest before it launches.",
+            "A test harness drives the lane and records what it covered.",
+            "Six Kani harnesses cover the parser; two other harnesses cover IO.",
+            "The agent harnesses on this machine each keep their own store.",
+        ] {
+            assert!(
+                !scan_prose(domain).iter().any(|t| t.id == "ai-diction"),
+                "the domain noun must clear: {domain}"
+            );
+        }
+    }
+
+    // The catalog's two word-choice entries stay two rules, and this project's own
+    // additions stay a third, so a verdict names what it matched and an unattributed
+    // term can never claim the catalog (call/0051).
+    #[test]
+    fn each_word_choice_rule_reports_its_own_id() {
+        assert!(ids("We utilize a robust and streamlined approach.").contains(&"ai-diction"));
+        assert!(ids("A rich tapestry across the whole ecosystem.").contains(&"grandiose-noun"));
+        assert!(ids("A nuanced and multifaceted showcase.").contains(&"house-diction"));
+        // Held out on measured evidence: every occurrence in this corpus names a real
+        // one. It must not silently arrive with the rest of the grandiose nouns.
+        assert!(
+            !ids("The deep-learning framework loads the merge-driver framework.")
+                .contains(&"grandiose-noun"),
+            "`framework` is deliberately not detected"
+        );
     }
 
     fn md_ids(md: &str) -> Vec<&'static str> {
