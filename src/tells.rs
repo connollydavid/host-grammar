@@ -82,11 +82,16 @@ const CORPUS: &[Lexeme] = &[
     Lexeme {
         id: "grandiose-noun",
         phrases: &[
-            "tapestry", "landscape", "paradigm", "synergy", "ecosystem",
-            // The catalog also lists `framework` here. It is held out on the same
-            // evidence that retired the bare `harness`: all six occurrences in this
-            // corpus name a real one (a merge-driver framework, a deep-learning
-            // framework). Add it when a corpus shows the grandiose sense, not before.
+            "tapestry", "landscape", "synergy",
+            // The catalog also lists `framework`, `ecosystem` and `paradigm`. All
+            // three are held out, because the catalog describes general prose while
+            // this rule runs over software documentation, where each names a real
+            // thing: a merge-driver framework, a package ecosystem, the actor
+            // paradigm. That is the evidence that retired the bare `harness`, and it
+            // is stronger here, since the reader is a software project by
+            // construction. Add one back when a corpus shows the grandiose sense.
+            // `landscape` stays: its technical uses are compounds (a fitness
+            // landscape), which a repo declares in its LEXICON.
         ],
         weight: 0.5,
         cite: "tropes.fyi: Tapestry and Landscape",
@@ -858,15 +863,20 @@ mod tests {
     #[test]
     fn each_word_choice_rule_reports_its_own_id() {
         assert!(ids("We utilize a robust and streamlined approach.").contains(&"ai-diction"));
-        assert!(ids("A rich tapestry across the whole ecosystem.").contains(&"grandiose-noun"));
+        assert!(ids("A rich tapestry of synergy across the landscape.").contains(&"grandiose-noun"));
         assert!(ids("A nuanced and multifaceted showcase.").contains(&"house-diction"));
-        // Held out on measured evidence: every occurrence in this corpus names a real
-        // one. It must not silently arrive with the rest of the grandiose nouns.
-        assert!(
-            !ids("The deep-learning framework loads the merge-driver framework.")
-                .contains(&"grandiose-noun"),
-            "`framework` is deliberately not detected"
-        );
+        // The three software terms of art the catalog lists and this rule holds out.
+        // They must not silently arrive with the rest of the grandiose nouns.
+        for held_out in [
+            "The deep-learning framework loads the merge-driver framework.",
+            "The package ecosystem publishes one crate per component.",
+            "The actor paradigm gives each mailbox a single reader.",
+        ] {
+            assert!(
+                !ids(held_out).contains(&"grandiose-noun"),
+                "held out of the grandiose nouns: {held_out}"
+            );
+        }
     }
 
     fn md_ids(md: &str) -> Vec<&'static str> {
