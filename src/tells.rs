@@ -723,6 +723,31 @@ pub fn scan_prose_markdown(md: &str) -> Vec<Tell> {
     scan_blocks(&blocks, &all_text)
 }
 
+/// Like `scan_prose_markdown`, but `mask` is applied to the prose text *after* the
+/// block structure has been decided from the unmasked `md`.
+///
+/// A caller that masks sanctioned vocabulary before detection (host-lint's LEXICON)
+/// cannot use `scan_prose_markdown`, because the mask changes what the markdown
+/// means. Blanking a phrase declared at column one with spaces leaves four or more
+/// leading spaces, `parse_markdown` reads that as an indented code block, and the
+/// whole line is dropped — silently, taking every unrelated tell on it. A
+/// declaration is scoped to a phrase, so its blast radius must be that phrase.
+///
+/// Block structure is a property of what the author wrote. Masking is a
+/// detection-time concern and is not allowed to change it, which is why the parse
+/// runs first and the mask second rather than the other way round.
+///
+/// `mask` must be byte-length preserving, so that an offset into the masked text
+/// still indexes the caller's original source.
+pub fn scan_prose_markdown_masked(md: &str, mask: &dyn Fn(&str) -> String) -> Vec<Tell> {
+    let mut blocks = parse_markdown(md);
+    for b in &mut blocks {
+        b.text = mask(&b.text);
+    }
+    let all_text = blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n\n");
+    scan_blocks(&blocks, &all_text)
+}
+
 // Over-threshold needs high absolute weight AND high density (conservative; tune with fixtures).
 const ABS_GATE: f32 = 4.0;
 const DENSITY_GATE: f32 = 0.6;
@@ -761,6 +786,45 @@ mod tests {
 
     fn ids(text: &str) -> Vec<&'static str> {
         scan_prose(text).into_iter().map(|t| t.id).collect()
+    }
+
+    // A space mask applied before the parse turns a column-one declaration into
+    // four leading spaces, which reads as an indented code block and drops the whole
+    // line — taking every unrelated tell on it, silently. Deciding the structure
+    // first keeps a declaration's blast radius equal to its phrase (host-lint#26).
+    #[test]
+    fn a_column_one_mask_does_not_swallow_the_line() {
+        let line = "Apache Tapestry logs to disk; a second tapestry runs nightly.";
+        let blank = |s: &str| s.replacen("Apache Tapestry", "               ", 1);
+        assert_eq!(blank(line).len(), line.len(), "the mask must preserve byte length");
+
+        // Masking before the parse: the line becomes an indented code block and
+        // everything on it is lost, including the standalone tell.
+        let swallowed = scan_prose_markdown(&blank(line));
+        assert!(
+            !swallowed.iter().any(|t| t.id == "grandiose-noun"),
+            "precondition: mask-then-parse drops the line"
+        );
+
+        // Parsing before the mask: the declared phrase is cleared, the standalone
+        // occurrence outside it still flags.
+        let kept = scan_prose_markdown_masked(line, &blank);
+        assert_eq!(
+            kept.iter().filter(|t| t.id == "grandiose-noun").count(),
+            1,
+            "the undeclared occurrence must survive a declaration of the other"
+        );
+    }
+
+    // Off column one there was never a bug; the two paths must agree, so the fix
+    // cannot be smuggling in a behaviour change beyond the indentation case.
+    #[test]
+    fn masked_scan_matches_unmasked_when_no_indent_is_created() {
+        let line = "The Apache Tapestry app logs to disk; a second tapestry runs nightly.";
+        let blank = |s: &str| s.replacen("Apache Tapestry", "               ", 1);
+        let a: Vec<_> = scan_prose_markdown(&blank(line)).into_iter().map(|t| t.id).collect();
+        let b: Vec<_> = scan_prose_markdown_masked(line, &blank).into_iter().map(|t| t.id).collect();
+        assert_eq!(a, b);
     }
 
     #[test]
