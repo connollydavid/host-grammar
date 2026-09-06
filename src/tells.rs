@@ -90,6 +90,8 @@ const CORPUS: &[Lexeme] = &[
             // paradigm. That is the evidence that retired the bare `harness`, and it
             // is stronger here, since the reader is a software project by
             // construction. Add one back when a corpus shows the grandiose sense.
+            // Read 2026-09-06 (plan/0087): no grandiose-sense use observed in the
+            // swept corpora; the next word-choice milestone re-reads them.
             // `landscape` stays: its technical uses are compounds (a fitness
             // landscape), which a repo declares in its LEXICON.
         ],
